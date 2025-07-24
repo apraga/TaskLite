@@ -89,10 +89,12 @@ import Data.Hourglass (
   Duration (durationHours, durationMinutes),
   ISO8601_Date (ISO8601_Date),
   Minutes (Minutes),
+  Seconds (Seconds),
   Time (timeFromElapsedP),
   TimeOfDay (todNSec),
   timeAdd,
   timePrint,
+  timeDiff,
  )
 import Data.List (nub)
 import Data.Text qualified as T
@@ -2365,14 +2367,25 @@ formatTag conf =
     . pretty
 
 
+
+-- Convert seconds to "3d10h" format
+-- TODO use Iso.formatDuration ?
+formatDuration :: Seconds -> T.Text
+formatDuration (Seconds totalSeconds) =
+  let
+    days = totalSeconds `P.div` (24 * 3600)
+    remainingAfterDays = totalSeconds `P.mod` (24 * 3600)
+    hours = remainingAfterDays `P.div` 3600
+  in
+    T.pack $ show days <> "d" <> show hours <> "h"
+
 formatTaskLine :: Config -> DateTime -> Int -> FullTask -> Doc AnsiStyle
 formatTaskLine conf now taskWidth task =
   let
     id = pretty $ T.takeEnd taskWidth task.ulid
-    createdUtc =
-      fmap
-        (T.pack . timePrint ISO8601_Date)
-        (ulidTextToDateTime task.ulid)
+    createdMaybe = ulidTextToDateTime task.ulid
+    fillAge = T.center (dateWidth conf) ' '
+    ageMaybe = fmap (fillAge . formatDuration . timeDiff now) createdMaybe
     tags = fromMaybe [] task.tags
     closedUtcMaybe =
       task.closed_utc
@@ -2407,7 +2420,7 @@ formatTaskLine conf now taskWidth task =
     --   then annotate (bodyStyle conf) doc
     --   else annotate (color Red) doc
     taskLine =
-      createdUtc <&> \taskDate ->
+      ageMaybe <&> \age ->
         hang hangWidth $
           hhsep $
             P.filter
@@ -2421,7 +2434,7 @@ formatTaskLine conf now taskWidth task =
                           realToFrac $
                             fromMaybe 0 task.priority
                   )
-              , annotate (dateStyle conf) (pretty taskDate)
+              , annotate (dateStyle conf) (pretty age)
               , pretty
                   ( case task.review_utc >>= parseUtc of
                       Nothing -> "" :: Text
@@ -3217,7 +3230,7 @@ formatTasks conf now isTruncated tasks =
               (fill (prioWidth conf) "Prio")
             <++> annotate
               (dateStyle conf <> strong)
-              (fill (dateWidth conf) "Opened UTC")
+              (fill (dateWidth conf) "Age")
             <++> annotate
               (bodyStyle conf <> strong)
               (fill (bodyWidth conf) "Body")
